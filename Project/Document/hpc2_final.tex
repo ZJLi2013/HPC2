@@ -1,0 +1,344 @@
+%========================================================================
+\documentclass[11pt]{article}
+\usepackage{graphicx}
+\graphicspath{{figs/}}
+
+%===========================================
+% Fix the margins
+\setlength{\topmargin}{-0.4in}    % distance from top of page to begining of text
+\setlength{\textheight}{9.0in}    % height of main text
+\setlength{\textwidth}{6.5in}     % width of text
+\setlength{\oddsidemargin}{0.in}  % odd page left margin
+\setlength{\evensidemargin}{0.in} % even page left margin
+
+%===========================================
+\usepackage{amssymb,amsfonts}
+\usepackage{amsmath}
+
+%==========================================
+\usepackage[affil-it]{authblk} % for auther, address
+\usepackage{hyperref}
+%===========================================
+\usepackage{titling}
+\newcommand{\subtitle}[1]{
+	\posttitle{
+	\par\end{center}
+	\begin{center}\large#1\end{center}
+	\vskip 0.5em}
+}
+%============================================
+%\usepackage[]{algorithm2e}
+% http://tex.stackexchange.com/questions/163768/write-pseudo-code-in-latex
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+%============================================
+\usepackage{pdfpages}
+%http://en.wikibooks.org/wiki/LaTeX/Source_Code_Listings
+\usepackage{listings}  %inserting code
+\usepackage{color}
+
+\definecolor{mygreen}{rgb}{0,0.6,0}
+\definecolor{mygray}{rgb}{0.5,0.5,0.5}
+\definecolor{mymauve}{rgb}{0.58,0,0.82}
+\lstdefinestyle{customcpp} {
+	backgroundcolor=\color{white},
+	basicstyle=\footnotesize,
+	breaklines = true,
+	captionpos = b,
+	commentstyle = \color{mygreen},
+	frame = single,
+	keepspaces = true,
+	keywordstyle = \color{blue},
+	language=C++,
+	numbers=left,
+	numbersep = 5pt,
+	numberstyle =\tiny\color{mygray},
+	stringstyle=\color{mymauve},
+	tabsize=2,
+	title=\lstname
+}
+\lstset{style=customcpp}
+%==============================================
+\usepackage{subcaption}
+
+
+\begin{document}
+
+\title{HPC2 Final Project}
+\subtitle{Distributed SPMV algorithm design and performance analysis}
+
+%http://tex.stackexchange.com/questions/1408/where-to-put-the-institute-information-in-the-article-document-class
+\author{Zhengjiang Li \href {zhengjia@buffalo.edu}}
+\affil{Department Of Mechanical Engineering, University at Buffalo, SUNY}
+
+\date{}
+
+\maketitle
+
+\section {Abstract}
+	In this project, we design a sparse matrix on distributed systems, with considering 1D and 2D static CPU topology, and implemented basic operators, e.g spmv, CG, which present good performance.	
+
+% main body
+\section {Data Structure}
+
+	\begin{enumerate}
+	\item Distributed Vector Class 	
+
+	A {\color{blue} Distributed Vector } ($Ds\_Vector$) is defined by specifying its local size, and a pointer to access values. Member functions include Constructor, Deconstructor, Fill zero value, Fill random value, Dot Product and Scalar Product. OOD is very flexible, so we can override other arithmetic operators, assigment operators, and norm, max, min functions easily for $Ds\_Vector$. 
+
+	Following is a global vector structure, each sub-part is a $Ds\_Vector$ object. And most $Ds\_Vector$ have same length, except these related to geometry boundary, which have smaller length as it should be. 
+
+% http://tex.stackexchange.com/questions/37581/latex-figures-side-by-side
+\begin{figure}[h!]
+\centerline
+{
+	\includegraphics[width= .5\linewidth]{CPU}
+	\includegraphics[width=.5\linewidth]{compressed}
+}
+\caption{Distributed Storage}
+\end{figure}
+
+
+	\item Distributed Sparse Matrix Class 
+
+	A {\color{blue} Distributed sparse matrix} ($Ds\_Matrix$) is defined by a sparse matrix and a distributed data structure. The sparse matrix defines compressed storage format related member data, nonzerosInRows, localNumberOfRows, localNumberOfColumns, NumberOfNonzeros(nnz), and a double pointer to access element entities. Following illustrate a $Ds\_Matrix$ object:
+
+The distributed data structure is used to count MPI communication entities, Neighbors, ElementsSend, ElementsReceived, NumberOfNeighbors, SendLength, ReceivedLength. Since send buffer allocation needs sendLength for each neighbor, so it's better to define Buffer member data in $Ds\_Matrix$ as well.
+
+Since the distributed property, the size of each $Ds\_Matrix$ object is varied due to the number of MPI Received data. And the  more it received from neighbors, the column will be adding, which we can describe as a ghost domain of current local matrix domain.
+	
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=\textwidth]{Ghost}
+	\caption{Local and Ghost domain of a $Ds\_Matrix$ object}
+\end{figure} 
+
+And a little trick here is for communication in MPI community, we need global index of elements, but also we need local index of elements to access the special element in $Ds\_Vector$, which we don't have a global index, but distributed on each procs.  
+
+	\end{enumerate}
+
+\section {Distributed SPMV algorithm}
+
+	After $Ds\_Vector$ and $Ds\_Matrix$ are defined well, we can build the second level, namely spmv.	
+
+The basic idea here is: for the compressed matrix, we use local nnz index to only access nonzero element entities in the $Ds\_Matrix$ object, and use the local same index to access vector element entities in the $Ds\_Vector$ object in the same procs(current procs). 
+
+\begin{algorithm}
+\caption{spmv algorithm}
+\begin{algorithmic}[1]
+\For {$ i=0; i<LocalNumberOfRows; i++$} 
+	\State $cur\_mat\_val = matrixValues[i]$
+	\State $ur\_local\_ind = matrixInd[i] $
+	\State $cur\_nnz = nnzInRow[i] $
+
+	\For {$j=0; j<cur_nnz; j++ $}
+		\State $ sum += cur\_mat\_val[j] * vec\_val[cur\_nnz[j]] $
+	\EndFor
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+	
+
+The algorithm above works well for both serial and distributed cpus, but for later case, which is our main job here, needs more details. 
+	
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=\textwidth]{spmv}
+	\caption{distributed spmv}
+\end{figure}
+
+The $Ds\_Matrix$ object store all local nnz matrix elements, but some related vector elements maybe come from external neighbors, as we see in the graphic above, {\color{red} $\bullet$} and {\color{green} $\bullet$} is from different procs, the local vector elements is colored by {\color{blue} $\bullet$}. And to access these external vector entitie we first need global index of the entities that are outside of current local procs to define which neighbor procs it belongs to, and second we need the local index to go into that neighbor procs to access its value. We will give an example following:
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=\textwidth]{geom}
+	\caption{Interface Communication}
+\end{figure}
+	
+First, the stencil style is 9-points for inside domain, 6-points for boundary grid points, and 4-points for corner grid points. This is a very general stencil, of course we can define like 5-points stencil as well. Second, the red line shows the interface between two neighbor procs. The number on each grid point is global index, index $101 - 105$ belongs to $pros_i$ and index $106 - 110$ belongs to $pros_j$. 
+	 	
+\begin{center}
+	\begin{tabular}{|l |l |l |}
+	\hline
+	GlobalRow & nnzColInCurRow &   Interface Communicate \\ \hline
+	101	&  (96, 97, 101, 102, 106, 107) & (j, 106, 107) \\ \hline
+	102	&  (96, 97, 98, 101, 102, 103, 106, 107, 108) & (j, 106, 107, 108) \\ \hline
+ 	103	&  (97, 98, 99, 102, 103, 104, 107, 108 109 & (j, 107, 108, 109) \\ \hline
+	...	& 	...	... 	...		&  ... \\
+	\hline
+	\end{tabular}
+\end{center}
+
+It's clearly that $pros_i$ needs elements whose global index are $106 - 110$ from $pros_j$ , in verse, $pros_j$ needs elements whose global index are $101 - 105$ from $pros_i$. Attention, we don't transfer matrix elements here, but only mark the global index that need transfer between pros, which will be used to access the vectors elements from external $Ds\_Vector$ objects.   
+ 
+\section{Discussions}
+
+	\begin{enumerate}
+
+	\item{CG algorithm} 
+
+	In this part, we build the third level application, namely CG algorithm based on the previous spmv and distributed vector operators.
+
+\begin{algorithm}
+\caption{CG algorithm}
+\begin{algorithmic}[1]
+
+\State $SparseMatrix A$
+\State $Vector x0, Ax0, b, r, d$ 
+\State $spmv(A, x0)$ 
+\State $ScalarProduct(b, Ax0, r)$ \% initial residual
+\State $DotProduct(r, r, normr);$ \% residual norm
+\State $norm0 = norm$ 
+\For {$ i=1; i<max\_iter \&\& normr/norm0 > eps; i++$} 
+	\State $beta = norm/norm0;$
+	\State $ScalarProduct(z, beta, d, d)$ \%update direction vector
+	\State $spmv(A, d, Ad)$ 
+	\State $DotProduct(d, Ad, dAd);$
+	\State $alpha = norm/dAd;$
+	\State $ScalarProduct(x, alpha, d, x);$ \%update solution vector
+	\State $ScalarProduct(r, -alpha, Ad, r);$ \%update residual vector
+	\State $DotProduct(r, r, normr)$
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+	
+
+	Assuming total geom size is $NX, NY$, total CPU number is $p$, on each distributed matrix object has local geom size $ nx \& ny$, and local number of matrix row is $N = nx \cdot ny$, and total non-zeros matrix entities is $m = nnzInRow * N$, for discritization stencil in $Figure 4$, the max $nnzInRow =9$ in a row. Also assuming CPU $flops$ is $c_1$ and communication speed is $c_2$.
+	 
+	In CG algorithm above, the dominating operation is one $spmv$ and two $DotProduct$. Each $spmv$ has $m$ additions and $m$ multiplications, and each $DotProdcut$ has $N$ additions. so the cpu time complexity for each CPU per CG iteration is: 
+
+	\begin{equation}
+t_1 = (2m + 2N)/c_1 = 2(nnzInRow+1)N/c_1 
+	\end{equation}  
+
+	For communication time complexity $t_2$, which is strongly affected by CPU topology structure. For 2D CPU topology, assuming the number of CPUs on each direction is $px, py$ respectively. 
+
+\begin{center}
+	\begin{tabular}{|l |l |l | l|}
+	\hline
+	topology & localX &   localY  & buffer \\ \hline
+	1D	&  NX & NY/p & 2NX \\ \hline
+	2D	&  NX/px & NY/py & 2(NX/px + NY/py)\\ \hline
+	...	& 	...	... 	...		&  ... \\
+	\hline
+	\end{tabular}
+\end{center}
+ 
+	In per CG iteration: for 1D CPU topology, which is a constant.
+	
+	\begin{equation}
+	 t_2 = 2NX/c_2 
+	\end{equation}
+
+	For 2D CPU topology,
+	\begin{equation}	
+	t_2 = 2(NX/px + NY/py)/c_2
+	\end{equation} 
+
+ And it's easy to see $NX \cdot NY /p = NX/px \cdot NY/py$, so the cpu time complexisty is same for different CPU topology.
+
+Total time complexity for each CG iteration will be, define $ \delta = (nnzInRow+1)$
+
+	\[
+	 t = t_1 + t_2 = \left \{
+				 \begin{array}{ll}
+				 2\delta \frac{NX \cdot NY}{ p \cdot c_1} + 2 \frac{NX}{c_2}  \  \% 1D \ cpu	\\
+				\\
+				 2\delta \frac{NX \cdot NY}{ p \cdot c_1} + 2 \frac{NX \cdot py + NY \cdot px}{px \cdot py \cdot c_2}  \ \% 2D \  cpu	\\
+
+				  \end{array}		 
+			\right.
+	  \]
+
+	
+	We can say that: assuming $NX=NY$, and define $\gamma = \delta \frac{c_2}{c_1}$, for $t_2>t_1$: 
+	
+	The time complexity is proportional to the size of problem, nonzeros In rows, as well as hardward performance. The speed-up will reach an upper limit when:
+	\begin{enumerate}
+	\item{For 1D CPU topology, $p \geq \gamma  NX$ }
+	\item{For 2D CPU topology,  $ 2\sqrt{p} \geq \gamma NX$ }
+	\end{enumerate}
+
+	So for the same geom size, 2D CPU topology can use more processes than 1D CPU, which maybe give better performance.
+	
+	% with a small number of CPUs (e.g. $ p \leq 4$), 1D CPU topology has better performance, while for large number of CPUs, 2D will be better. Similar situation happens in 3D CPU topology structure. So for large practial applications, it is a good try to choose a balanced CPU topology structure. 
+
+
+	For CG algorithm convergence, let the convergence coefficient $\epsilon$,  the maximum number of iterations is
+	\begin{equation}
+	 max = \frac{1}{2} \sqrt{\kappa} \ln{(\frac{2}{\epsilon})} 
+	\end{equation}
+
+	where $\kappa \in \mathcal{O}(N^{2/d})$.
+
+	For 2D geom, the total time to achive convergence solution can be approxiated as:
+	\begin{equation}
+	total\_t = max \cdot t
+	\end{equation}
+
+	The space complexity includes sparse matrix $\mathcal{O}(m)$ and distributed vector $\mathcal{O}(N)$,which result to $ \gamma  N \in \mathcal{O}(N)$.
+
+	\item{Results}
+	
+	In this part, we test CG algorithm with different size of geom and with both 1D CPU and 2D CPU topology structure as following:
+
+	\begin{enumerate}
+	\item{1D CPU Performance}
+\begin{center}
+	\begin{tabular}{|l |l |l | l|l|l|l|}
+	\hline
+	global-geom  & 1 cpu & 2 cpu & 4cpu & 8 cpu & 16cpu  & 32cpu \\ \hline
+	100 $\cdot$ 640 &  0.185679 & 0.101678 & 0.0494871 & 0.0262241 & 0.023705 & null \\	\hline
+	200 $\cdot$ 1280 & 0.82508 & 0.415966 & 0.1867 & 0.101331 & 0.0608919 & 0.0799921 \\ \hline
+	400 $\cdot$ 2560 & null & 1.62804 & 0.827742 & 0.436024 & 0.239722 & 0.110997 \\ \hline
+	800 $\cdot$ 3200  & null & 4.40849 & 2.09566 & 1.05417 & 0.525906 & 0.644021\\ 
+	\hline 	
+	\end{tabular}
+\end{center}
+ 
+\begin{figure}[h!]
+\centerline
+{
+	\includegraphics[width= .5\linewidth]{1Dcpu}
+	\includegraphics[width=.5\linewidth]{2D}
+}
+\caption{CPU performance}
+\end{figure}
+
+	\item{2D CPU Performance}
+
+\begin{center}
+	\begin{tabular}{|l |l |l | l|l|l|l|}
+	\hline
+	global-geom  & 1 cpu & 2 cpu & 4cpu & 8 cpu & 16cpu  & 32cpu \\ \hline
+	800 $\cdot$ 800 &  1.96678 & 1.05339 & 0.552622 & 0.27504 & 0.135523 & 0.255191\\	\hline
+	1600 $\cdot$ 1600 &  7.96045 & 4.29764 & 2.27896 & 1.0517 & 0.539906 & 0.526259 \\ \hline
+	2048 $\cdot$ 2048  & 13.1516 & 7.71424 & 3.49135 & 1.845765 & 0.915423 & 0.7428\\ 
+	\hline 	
+	\end{tabular}
+\end{center}
+
+	\end{enumerate}
+
+
+	\end{enumerate}
+
+\section{source code}	
+	Whole project src can be found at \textbf{https://github.com/ZJLi2013/HPC2/Project}. Here listing distributed sparse matrix data structure, and CG code.
+
+	\lstinputlisting[language=C,caption=distributed sparse matrix]{../sparse.hpp}
+	\lstinputlisting[language=C,caption=CG]{../cg.hpp}
+
+
+\section {Future work}
+
+	Right now the CPU topology structure and the geometry is considered 1D and 2D. For large practical 3D applications, so it's better to design a 3D CPU topology structure for these problems. 
+
+	Other issues can be considered later, such as few sparse matrix mode, GPU model, and high-level application based on these basic operators, such as FEA, can also be added later. 	
+
+\section {Reference}
+
+	1 Jonathan Richard Shewchuk "An introduction to the Conjugate Gradietn Method without the Agonizing Pain"
+
+
+\end{document}
