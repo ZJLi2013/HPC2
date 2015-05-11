@@ -1,0 +1,288 @@
+\documentclass[mathserif]{beamer}
+%===========================================
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+%===========================================
+\usepackage{biblatex}
+%============================================
+\usepackage{pdfpages}
+%http://en.wikibooks.org/wiki/LaTeX/Source_Code_Listings
+\usepackage{listings}  %inserting code
+\usepackage{color}
+
+\definecolor{mygreen}{rgb}{0,0.6,0}
+\definecolor{mygray}{rgb}{0.5,0.5,0.5}
+\definecolor{mymauve}{rgb}{0.58,0,0.82}
+\lstdefinestyle{customcpp} {
+	backgroundcolor=\color{white},
+	basicstyle=\footnotesize,
+	breaklines = true,
+	captionpos = b,
+	commentstyle = \color{mygreen},
+	frame = single,
+	keepspaces = true,
+	keywordstyle = \color{blue},
+	language=C++,
+	numbers=left,
+	numbersep = 2pt,
+	numberstyle =\tiny\color{mygray},
+	stringstyle=\color{mymauve},
+	tabsize=2,
+	title=\lstname
+}
+\lstset{style=customcpp}
+%==============================================
+
+\usetheme{UB}
+\graphicspath{{figs/}}
+
+\date{June 15, 2015}
+\author{Zhengjiang Li}
+\institute{Department of Mechanical and Aerospace Engineering\\
+University at Buffalo, State University of New York}
+\title[Master Oral Defense]{Distributted SPMV algorithm design and performance analysis}
+
+\begin{document}
+
+%===============================================================================
+% Title Slide
+%===============================================================================
+\begin{frame}
+\titlepage
+\end{frame}
+
+%===============================================================================
+% Title Slide
+%===============================================================================
+\begin{frame}
+\frametitle{Data Structure}
+
+% Block without title
+\begin{columns}
+\begin{column}{0.4\textwidth}
+\begin{block}{}
+\begin{itemize}
+\item Distributed Vector
+\item Distributed Sparse Matrix 
+\end{itemize}
+\end{block}
+\end{column}
+
+\begin{column}{0.5\textwidth}
+\begin{block}{}
+\centerline{\includegraphics[width=\linewidth]{Ghost}}
+\end{block}
+\end{column}
+
+\end{columns}
+
+\end{frame}
+
+
+%===============================================================================
+% Title Slide
+%===============================================================================
+\begin{frame}
+\frametitle{Distributed SPMV}
+
+\begin{columns}
+\begin{column}{0.45\textwidth}
+\begin{block}{}
+
+\begin{algorithm}[H]
+\tiny
+\caption{SPMV}
+\begin{algorithmic}[1]
+\For {$ i=0; i<LocalNumberOfRows; i++$} 
+	\State $cur\_mat\_val = matrixValues[i]$
+	\State $ur\_local\_ind = matrixInd[i] $
+	\State $cur\_nnz = nnzInRow[i] $
+
+	\For {$j=0; j<cur_nnz; j++ $}
+		\State $ sum += cur\_mat\_val[j] * vec\_val[cur\_nnz[j]] $
+	\EndFor
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+	
+\end{block}
+\end{column}
+%
+\begin{column}{0.45\textwidth}
+\begin{block}{spmv}
+\centerline{\includegraphics[width=\linewidth]{spmv}}
+\end{block}
+\end{column}
+\end{columns}
+
+\end{frame}
+
+%===============================================================================
+% Title Slide
+%===============================================================================
+\begin{frame}
+\frametitle{Communication Buffer}
+
+% Block without title
+\begin{block}{}
+	 	
+\begin{center}
+\tiny
+	\begin{tabular}{|l |l |l |}
+	\hline
+	GlobalRow & nnzColInCurRow &   Interface Communicate \\ \hline
+	101	&  (96, 97, 101, 102, 106, 107) & (j, 106, 107) \\ \hline
+	102	&  (96, 97, 98, 101, 102, 103, 106, 107, 108) & (j, 106, 107, 108) \\ \hline
+ 	103	&  (97, 98, 99, 102, 103, 104, 107, 108 109 & (j, 107, 108, 109) \\ \hline
+	...	& 	...	... 	...		&  ... \\
+	\hline
+	\end{tabular}
+\end{center}
+\end{block}
+
+\begin{block}{}
+\centerline{\includegraphics[width=0.5\linewidth]{geom}}
+\end{block}
+
+\end{frame}
+
+
+%===============================================================================
+% Title Slide
+%===============================================================================
+\begin{frame}
+\frametitle{CG algorithm}
+
+% Block without title
+\begin{block}{}
+\begin{algorithm}[H]
+\tiny
+\caption{CG}
+\begin{algorithmic}[0.5]
+
+\State $SparseMatrix A$
+\State $Vector x0, Ax0, b, r, d$ 
+\State $spmv(A, x0)$ 
+\State $ScalarProduct(b, Ax0, r)$ \% initial residual
+\State $DotProduct(r, r, normr);$ \% residual norm
+\State $norm0 = norm$ 
+\For {$ i=1; i<max\_iter \&\& normr/norm0 > eps; i++$} 
+	\State $beta = norm/norm0;$
+	\State $ScalarProduct(z, beta, d, d)$ \%update direction vector
+	\State $spmv(A, d, Ad)$ 
+	\State $DotProduct(d, Ad, dAd);$
+	\State $alpha = norm/dAd;$
+	\State $ScalarProduct(x, alpha, d, x);$ \%update solution vector
+	\State $ScalarProduct(r, -alpha, Ad, r);$ \%update residual vector
+	\State $DotProduct(r, r, normr)$
+\EndFor
+\end{algorithmic}
+\end{algorithm}	
+
+\end{block}
+\end{frame}
+
+%===============================================================================
+% Title Slide
+%===============================================================================
+\begin{frame}
+\frametitle{Time Complexity}
+
+%assume global geom size is $NX, NY$, local geom size is $nx, ny$, procs # is $p$
+%define $ N = nx \cdot ny $, total local nnz $m = N \cdot nnzInRow $, in each CG iteration:
+		
+\begin{block}{}
+\begin{center}
+	\small
+	\begin{tabular} {|l |l |l | l|}	
+	\hline
+	topology & localX &   localY  & buffer \\ \hline
+	1D	&  NX & NY/p & 2NX \\ \hline
+	2D	&  NX/px & NY/py & 2(NX/px + NY/py)\\ \hline
+	...	& 	...	... 	...		&  ... \\
+	\hline
+	\end{tabular}
+\end{center}
+\end{block}
+
+
+\begin{block}{}
+\small
+CPU calcuation time :  
+\begin{equation}
+t_1 = (2m + 2N)/c_1 = 2(nnzInRow+1)N/c_1 
+\end{equation}  
+
+Communicate time:
+	\begin{equation}
+	 t_2 = 2NX/c_2  \%1D\ cpu 
+	\end{equation}
+
+	\begin{equation}	
+	t_2 = 2(NX/px + NY/py)/c_2 \%2D\ cpu
+	\end{equation} 
+\end{block}
+
+\end{frame}
+%===============================================================================
+% Title Slide
+%===============================================================================
+\begin{frame}
+\frametitle{Time Complexity II}
+
+	\[
+	 t = t_1 + t_2 = \left \{
+				 \begin{array}{ll}
+				 2\delta \frac{NX \cdot NY}{ p \cdot c_1} + 2 \frac{NX}{c_2}  \  \% 1D \ cpu	\\
+				\\
+				 2\delta \frac{NX \cdot NY}{ p \cdot c_1} + 2 \frac{NX \cdot py + NY \cdot px}{px \cdot py \cdot c_2}  \ \% 2D \  cpu	\\
+
+				  \end{array}		 
+			\right.
+	  \]
+
+	The time complexity is proportional to the size of problem, nonzeros In rows, as well as hardward performance. The speed-up will reach an upper limit when:
+	\begin{enumerate}
+	\item{For 1D CPU topology, $p \geq \gamma  NX$ }
+	\item{For 2D CPU topology,  $ 2\sqrt{p} \geq \gamma NX$ }
+	\end{enumerate}
+
+	Also consider accuracy(iteration numbers)	
+
+\end{frame}
+
+%===============================================================================
+% Title Slide
+%===============================================================================
+\begin{frame}
+\frametitle{Results}
+\begin{figure}[h!]
+\centerline
+{
+	\includegraphics[width= .5\linewidth]{1Dcpu}
+	\includegraphics[width=.5\linewidth]{2D}
+}
+\caption{CPU performance}
+\end{figure}
+\end{frame}
+
+%===============================================================================
+% Title Slide
+%===============================================================================
+\begin{frame}
+\frametitle{sparse matrix src}
+\tiny
+	\lstinputlisting[language=C,caption=distributed sparse matrix]{sparse.hpp}
+\end{frame}
+
+%===============================================================================
+% Title Slide
+%===============================================================================
+\begin{frame}
+	\begin{Huge} Thank you for your attention \end{Huge}	
+
+\footfullcite{Jonathan Richard Shewchuk "An introduction to the Conjugate Gradietn Method without the Agonizing Pain" }
+
+\end{frame}
+
+\end{document}
