@@ -1,2 +1,6 @@
 
 This is actually rebuild the wheel project, practice on MPI and obtain better understand on sparse matrix operators
+
+The geom structure is 2D, the cpu topology is 1D or 2D, while the performance of 2D is not that good as I thought
+
+A great project online can be found: HPCG
